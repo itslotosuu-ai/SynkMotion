@@ -96,7 +96,7 @@ class MainActivity : Activity(), SensorEventListener {
             backgroundTintList = ColorStateList.valueOf(Color.rgb(24, 42, 32))
             setOnClickListener {
                 if (mouseEnabled) {
-                    baseline = latestGyro.copyOf()
+                    this@MainActivity.baseline = latestGyro.copyOf()
                     calibrated = true
                     stateText.text = "●  MOUSE ACTIVE / CALIBRATED"
                 }
