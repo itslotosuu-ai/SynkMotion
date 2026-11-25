@@ -52,6 +52,8 @@ class MainActivity : Activity(), SensorEventListener {
     private var calibrated = false
     private var hid: BluetoothMouseHid? = null
     private var lastMotionAt = 0L
+    private var motionRemainderX = 0f
+    private var motionRemainderY = 0f
     private var motionSensitivity = 22f
     private var baseline = FloatArray(3)
     private var latestGyro = FloatArray(3)
@@ -301,7 +303,7 @@ class MainActivity : Activity(), SensorEventListener {
         activityResumed = true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH_PERMISSION)
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE), REQUEST_BLUETOOTH_PERMISSION)
         } else {
             startHid()
         }
