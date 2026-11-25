@@ -1,6 +1,13 @@
 package com.synk.motion
 
 import android.app.Activity
+import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -35,6 +42,11 @@ class MainActivity : Activity(), SensorEventListener {
     private lateinit var stateText: TextView
     private lateinit var mouseToggle: Button
     private lateinit var animatedBackground: MotionBackgroundView
+    private lateinit var homePanel: LinearLayout
+    private lateinit var devicesPanel: LinearLayout
+    private var bluetoothAdapter: BluetoothAdapter? = null
+    private var selectedDeviceAddress: String? = null
+    private var selectedDeviceName: String? = null
     private var mouseEnabled = false
     private var activityResumed = false
     private var calibrated = false
@@ -49,6 +61,11 @@ class MainActivity : Activity(), SensorEventListener {
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
+        bluetoothAdapter = bluetoothManager.adapter
+        val savedDevice = getSharedPreferences("synk_motion", MODE_PRIVATE)
+        selectedDeviceAddress = savedDevice.getString("selected_device_address", null)
+        selectedDeviceName = savedDevice.getString("selected_device_name", null)
 
         val frame = FrameLayout(this)
         animatedBackground = MotionBackgroundView()
@@ -59,8 +76,22 @@ class MainActivity : Activity(), SensorEventListener {
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setPadding(18, 14, 18, 14)
+        }
+        val tabs = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(28, 28, 28, 28)
+        }
+        homePanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(10, 12, 10, 12)
+        }
+        devicesPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(8, 8, 8, 8)
+            visibility = View.GONE
         }
 
         val title = label("SYNK MOTION", 19f, GREEN).apply {
@@ -103,22 +134,43 @@ class MainActivity : Activity(), SensorEventListener {
             }
         }
 
-        content.addView(title)
-        content.addView(subtitle)
+        homePanel.addView(title)
+        homePanel.addView(subtitle)
         val topGap = View(this)
-        content.addView(topGap, LinearLayout.LayoutParams(1, 12))
-        content.addView(stateText)
+        homePanel.addView(topGap, LinearLayout.LayoutParams(1, 12))
+        homePanel.addView(stateText)
         val middleGap = View(this)
-        content.addView(middleGap, LinearLayout.LayoutParams(1, 20))
-        content.addView(gyroText)
-        content.addView(accelText)
+        homePanel.addView(middleGap, LinearLayout.LayoutParams(1, 20))
+        homePanel.addView(gyroText)
+        homePanel.addView(accelText)
         val buttonGap = View(this)
-        content.addView(buttonGap, LinearLayout.LayoutParams(1, 12))
-        content.addView(mouseToggle, LinearLayout.LayoutParams(
+        homePanel.addView(buttonGap, LinearLayout.LayoutParams(1, 12))
+        homePanel.addView(mouseToggle, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 42
         ))
-        content.addView(calibrate, LinearLayout.LayoutParams(
+        homePanel.addView(calibrate, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 38
+        ))
+
+        val homeTab = tabButton("MOTION")
+        val devicesTab = tabButton("DEVICES")
+        homeTab.setOnClickListener {
+            homePanel.visibility = View.VISIBLE
+            devicesPanel.visibility = View.GONE
+        }
+        devicesTab.setOnClickListener {
+            homePanel.visibility = View.GONE
+            devicesPanel.visibility = View.VISIBLE
+            refreshDevicePanel()
+        }
+        tabs.addView(homeTab, LinearLayout.LayoutParams(0, 42, 1f))
+        tabs.addView(devicesTab, LinearLayout.LayoutParams(0, 42, 1f))
+        content.addView(tabs)
+        content.addView(homePanel, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
+        content.addView(devicesPanel, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
         frame.addView(content, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -129,6 +181,123 @@ class MainActivity : Activity(), SensorEventListener {
         if (gyro == null || accelerometer == null) {
             stateText.text = "●  SENSOR UNAVAILABLE"
         }
+    }
+
+    private fun tabButton(value: String) = Button(this).apply {
+        text = value
+        textSize = 10f
+        isAllCaps = false
+        setTextColor(GREEN)
+        backgroundTintList = ColorStateList.valueOf(Color.rgb(18, 38, 26))
+    }
+
+    private fun deviceActionButton(value: String, action: () -> Unit) = Button(this).apply {
+        text = value
+        textSize = 10f
+        isAllCaps = false
+        setTextColor(GREEN)
+        backgroundTintList = ColorStateList.valueOf(Color.rgb(24, 42, 32))
+        setOnClickListener { action() }
+    }
+
+    private fun refreshDevicePanel() {
+        if (!::devicesPanel.isInitialized) return
+        devicesPanel.removeAllViews()
+        devicesPanel.addView(label("BLUETOOTH DEVICES", 15f, GREEN))
+        devicesPanel.addView(label(
+            if (selectedDeviceName != null) "SAVED: $selectedDeviceName" else "SAVED: NONE",
+            9f, MUTED
+        ))
+
+        val adapter = bluetoothAdapter
+        if (adapter == null) {
+            devicesPanel.addView(label("BLUETOOTH NOT AVAILABLE", 9f, Color.WHITE))
+            return
+        }
+
+        val enabled = try { adapter.isEnabled } catch (_: SecurityException) { false }
+        devicesPanel.addView(label(
+            if (enabled) "●  BLUETOOTH ON" else "●  BLUETOOTH OFF",
+            10f, if (enabled) GREEN else Color.WHITE
+        ))
+        devicesPanel.addView(deviceActionButton(
+            if (enabled) "BLUETOOTH SETTINGS" else "TURN ON BLUETOOTH"
+        ) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH_PERMISSION)
+            } else if (!enabled) {
+                try {
+                    startActivityForResult(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQUEST_ENABLE_BT)
+                } catch (_: Exception) {
+                    startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                }
+            } else {
+                startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+            }
+        })
+        devicesPanel.addView(deviceActionButton("PAIR NEW DEVICE") {
+            startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+        })
+
+        if (!enabled) {
+            devicesPanel.addView(label("Turn Bluetooth on, then pair a device in system settings.", 9f, MUTED))
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) {
+            devicesPanel.addView(deviceActionButton("ALLOW BLUETOOTH ACCESS") {
+                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH_PERMISSION)
+            })
+            return
+        }
+
+        val pairedDevices = try { adapter.bondedDevices?.toList().orEmpty() }
+        catch (_: SecurityException) { emptyList() }
+
+        devicesPanel.addView(label("PAIRED DEVICES", 10f, MUTED))
+        if (pairedDevices.isEmpty()) {
+            devicesPanel.addView(label("No paired devices yet.", 9f, Color.WHITE))
+        } else {
+            pairedDevices.forEach { device ->
+                val name = try { device.name ?: "Bluetooth device" }
+                    catch (_: SecurityException) { "Bluetooth device" }
+                val address = try { device.address } catch (_: SecurityException) { "" }
+                devicesPanel.addView(deviceActionButton(
+                    if (address == selectedDeviceAddress) "✓  $name" else name
+                ) {
+                    selectedDeviceAddress = address
+                    selectedDeviceName = name
+                    getSharedPreferences("synk_motion", MODE_PRIVATE).edit()
+                        .putString("selected_device_address", address)
+                        .putString("selected_device_name", name)
+                        .apply()
+                    refreshDevicePanel()
+                }, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 38
+                ))
+            }
+        }
+        devicesPanel.addView(label(
+            "Selection is saved on this watch. Mouse data transfer is not active yet.",
+            8f, MUTED
+        ))
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_BLUETOOTH_PERMISSION) refreshDevicePanel()
+    }
+
+    @Deprecated("Deprecated in Android")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_ENABLE_BT) refreshDevicePanel()
     }
 
     private fun label(value: String, size: Float, color: Int) = TextView(this).apply {
@@ -175,12 +344,15 @@ class MainActivity : Activity(), SensorEventListener {
 
     override fun onResume() {
         super.onResume()
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         activityResumed = true
+        if (::devicesPanel.isInitialized && devicesPanel.visibility == View.VISIBLE) refreshDevicePanel()
         animatedBackground.start()
         if (mouseEnabled) startSensors()
     }
 
     override fun onPause() {
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         activityResumed = false
         stopSensors()
         animatedBackground.stop()
@@ -294,6 +466,8 @@ class MainActivity : Activity(), SensorEventListener {
     }
 
     companion object {
+        private const val REQUEST_BLUETOOTH_PERMISSION = 701
+        private const val REQUEST_ENABLE_BT = 702
         private val GREEN = Color.rgb(80, 255, 150)
         private val MUTED = Color.rgb(133, 170, 145)
     }
