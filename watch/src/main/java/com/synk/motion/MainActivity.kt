@@ -22,8 +22,12 @@ class MainActivity : Activity(), SensorEventListener {
     private lateinit var gyroText: TextView
     private lateinit var accelText: TextView
     private lateinit var stateText: TextView
+    private lateinit var mouseToggle: Button
+    private var mouseEnabled = false
+    private var activityResumed = false
     private var calibrated = false
     private var baseline = FloatArray(3)
+    private var latestGyro = FloatArray(3)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,16 +47,23 @@ class MainActivity : Activity(), SensorEventListener {
 
         val title = label("SYNK MOTION", 20f, Color.rgb(80, 255, 150))
         val subtitle = label("MOTION SENSOR // WATCH", 10f, Color.LTGRAY)
-        stateText = label("INITIALIZING", 12f, Color.WHITE)
+        stateText = label("MOUSE DISABLED", 12f, Color.WHITE)
         gyroText = label("GYRO  —", 12f, Color.rgb(80, 255, 150))
         accelText = label("ACCEL —", 12f, Color.rgb(150, 190, 160))
+
+        mouseToggle = Button(this).apply {
+            setOnClickListener { setMouseEnabled(!mouseEnabled) }
+        }
+        updateMouseButton()
 
         val calibrate = Button(this).apply {
             text = "CALIBRATE"
             setOnClickListener {
-                baseline = latestGyro.copyOf()
-                calibrated = true
-                stateText.text = "BASELINE SET"
+                if (mouseEnabled) {
+                    baseline = latestGyro.copyOf()
+                    calibrated = true
+                    stateText.text = "MOUSE ON / BASELINE SET"
+                }
             }
         }
 
@@ -61,13 +72,12 @@ class MainActivity : Activity(), SensorEventListener {
         root.addView(stateText)
         root.addView(gyroText)
         root.addView(accelText)
+        root.addView(mouseToggle)
         root.addView(calibrate)
         setContentView(root)
 
-        stateText.text = buildString {
-            append(if (gyro != null) "GYRO READY" else "NO GYRO")
-            append("  /  ")
-            append(if (accelerometer != null) "ACCEL READY" else "NO ACCEL")
+        if (gyro == null || accelerometer == null) {
+            stateText.text = "SENSOR UNAVAILABLE"
         }
     }
 
@@ -83,20 +93,47 @@ class MainActivity : Activity(), SensorEventListener {
         )
     }
 
-    private var latestGyro = FloatArray(3)
+    private fun updateMouseButton() {
+        if (!::mouseToggle.isInitialized) return
+        mouseToggle.text = if (mouseEnabled) "TURN MOUSE OFF" else "TURN MOUSE ON"
+    }
 
-    override fun onResume() {
-        super.onResume()
+    private fun setMouseEnabled(enabled: Boolean) {
+        mouseEnabled = enabled
+        if (activityResumed) {
+            if (mouseEnabled) startSensors() else stopSensors()
+        }
+        updateMouseButton()
+        stateText.text = if (mouseEnabled) "MOUSE ENABLED" else "MOUSE DISABLED"
+        if (!mouseEnabled) {
+            gyroText.text = "GYRO  PAUSED"
+            accelText.text = "ACCEL PAUSED"
+        }
+    }
+
+    private fun startSensors() {
         gyro?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
         accelerometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
     }
 
-    override fun onPause() {
+    private fun stopSensors() {
         sensorManager.unregisterListener(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        activityResumed = true
+        if (mouseEnabled) startSensors()
+    }
+
+    override fun onPause() {
+        activityResumed = false
+        stopSensors()
         super.onPause()
     }
 
     override fun onSensorChanged(event: SensorEvent) {
+        if (!mouseEnabled) return
         val v = event.values
         if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
             latestGyro = v.copyOf()
